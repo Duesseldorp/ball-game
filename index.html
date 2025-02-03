@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive Ball with Realistic Collisions, Score, Timer, TOTAL TIME, Custom Colors, 404 Background & Footer</title>
+  <!-- Google Fonts: Roboto -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    /* HTML and Body Styling */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      font-family: 'Roboto', sans-serif;
+    }
+    /* Container Styling */
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: white;
+    }
+    /* Background-404 Text */
+    #backgroundText {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 50vw;
+      color: rgba(200, 200, 200, 0.5);
+      z-index: 0;
+      pointer-events: none;
+      user-select: none;
+      line-height: 1;
+    }
+    /* Hole Styling */
+    #hole {
+      position: absolute;
+      /* Dimensions set via JavaScript */
+      background: #0d0b0c;
+      border-radius: 50%;
+      z-index: 5;
+      pointer-events: none;
+      user-select: none;
+    }
+    /* Red Ball Styling */
+    .ball {
+      position: absolute;
+      /* Dimensions set via JavaScript */
+      background: #ff0037;
+      border-radius: 50%;
+      left: 0;
+      top: 0;
+      z-index: 10;
+      touch-action: none;
+      user-select: none;
+    }
+    /* Counter Styling */
+    #counter {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      padding: 10px 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 14px;
+      font-weight: bold;
+      color: #000;
+    }
+    /* Footer Styling */
+    #footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      padding: 10px 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.8);
+    }
+    #footer a {
+      text-decoration: none;
+      color: #000;
+      font-size: 14px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <!-- Background-404 Text -->
+    <div id="backgroundText">404</div>
+    
+    <!-- Black Hole -->
+    <div id="hole"></div>
+    
+    <!-- Interactive Red Ball (created dynamically) -->
+    
+    <!-- Counter -->
+    <div id="counter">
+      <span id="scoreText">TOTAL: 0</span>
+      <span id="divider"> | </span>
+      <span id="timerText">TIMER: 0.0s</span>
+      <span id="divider2"> | </span>
+      <span id="totalTimeText">TOTAL TIME: 0.0s</span>
+    </div>
+    
+    <!-- Footer -->
+    <div id="footer">
+      <a href="https://www.duesseldorp.de" target="_blank">BY DUESSELDORP</a>
+    </div>
+  </div>
+  <script>
+    /***** Global Settings *****/
+    // Every round, sizes decrease by 2%
+    const sizeReductionFactor = 0.98;
+    // Minimum allowed ball diameter (in px)
+    const minBallDiameter = 30;
+    // Global sizes for the red ball and the hole.
+    // Starting ball size is 120 px.
+    // The hole is always 5% larger than the ball.
+    let currentBallDiameter = 120;
+    let currentHoleDiameter = currentBallDiameter * 1.05;
+    let holeDiameter = currentHoleDiameter;  // used for positioning
+
+    /***** DOM Elements *****/
+    const container = document.getElementById('container');
+    const hole = document.getElementById('hole');
+    const scoreElem = document.getElementById('scoreText');
+    const timerElem = document.getElementById('timerText');
+    const totalTimeElem = document.getElementById('totalTimeText');
+    // Set initial hole dimensions
+    hole.style.width = holeDiameter + "px";
+    hole.style.height = holeDiameter + "px";
+
+    /***** Container Dimensions *****/
+    let containerWidth = window.innerWidth;
+    let containerHeight = window.innerHeight;
+
+    /***** Position Variables for the Hole *****/
+    let holePos = { x: 0, y: 0 };
+    let holeRelativePos = { x: 0, y: 0 };
+
+    /***** Physics Constants *****/
+    let g = 1000; // gravitational acceleration in px/s²
+    let effectiveAcc = { x: 0, y: g };
+
+    /***** Damping *****/
+    let dampingCoefficient = 0.5; // in 1/s
+
+    /***** Time Tracking *****/
+    let lastTimestamp = null;
+    let timerStart = null;
+    // totalTimeStart remains constant for the session.
+    const totalTimeStart = performance.now();
+
+    /***** Score Tracking *****/
+    let score = 0;
+
+    /***** Ball Management *****/
+    const balls = []; // Array to hold active ball objects
+    // Flag for two-ball mode. (For testing, two-ball mode activates after 60 seconds.)
+    let emitTwoBalls = false;
+    const emissionDelay = 200; // 200ms delay between ball emissions
+
+    // Flag to ensure we schedule only one round reset per round.
+    let roundResetScheduled = false;
+
+    /***** Ball Class Definition *****/
+    class Ball {
+      constructor(initialPos, initialVel) {
+        // Use the current global ball diameter.
+        this.diameter = currentBallDiameter;
+        this.minDiameter = minBallDiameter;
+        this.pos = { x: initialPos.x, y: initialPos.y };
+        this.vel = { x: initialVel.x, y: initialVel.y };
+
+        // Create the ball element.
+        this.element = document.createElement('div');
+        this.element.classList.add('ball');
+        this.element.style.width = this.diameter + 'px';
+        this.element.style.height = this.diameter + 'px';
+        this.element.style.left = this.pos.x + 'px';
+        this.element.style.top = this.pos.y + 'px';
+        container.appendChild(this.element);
+
+        this.visible = true;
+        this.pointerStart = null;
+
+        // Bind pointer events for interactive impulse.
+        this.element.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+        this.element.addEventListener('pointerup', (e) => this.onPointerUp(e));
+      }
+
+      onPointerDown(e) {
+        this.pointerStart = { x: e.clientX, y: e.clientY };
+        this.element.setPointerCapture(e.pointerId);
+      }
+
+      onPointerUp(e) {
+        if (this.pointerStart) {
+          const pointerEnd = { x: e.clientX, y: e.clientY };
+          const delta = {
+            x: pointerEnd.x - this.pointerStart.x,
+            y: pointerEnd.y - this.pointerStart.y
+          };
+          const impulseFactor = 5;
+          this.vel.x += delta.x * impulseFactor;
+          this.vel.y += delta.y * impulseFactor;
+        }
+        this.pointerStart = null;
+        this.element.releasePointerCapture(e.pointerId);
+      }
+
+      update(deltaTime) {
+        // Update velocity with effective acceleration.
+        this.vel.x += effectiveAcc.x * deltaTime;
+        this.vel.y += effectiveAcc.y * deltaTime;
+
+        // Apply damping.
+        const dampingFactor = Math.exp(-dampingCoefficient * deltaTime);
+        this.vel.x *= dampingFactor;
+        this.vel.y *= dampingFactor;
+
+        // Update position.
+        this.pos.x += this.vel.x * deltaTime;
+        this.pos.y += this.vel.y * deltaTime;
+
+        // Collision with container borders.
+        if (this.pos.x < 0) {
+          this.pos.x = 0;
+          this.vel.x = -this.vel.x;
+        }
+        if (this.pos.x > containerWidth - this.diameter) {
+          this.pos.x = containerWidth - this.diameter;
+          this.vel.x = -this.vel.x;
+        }
+        if (this.pos.y < 0) {
+          this.pos.y = 0;
+          this.vel.y = -this.vel.y;
+        }
+        if (this.pos.y > containerHeight - this.diameter) {
+          this.pos.y = containerHeight - this.diameter;
+          this.vel.y = -this.vel.y;
+        }
+
+        // Update the element's position on screen.
+        this.element.style.left = this.pos.x + 'px';
+        this.element.style.top = this.pos.y + 'px';
+      }
+
+      checkCollision() {
+        // Calculate centers of ball and hole.
+        const ballCenter = {
+          x: this.pos.x + this.diameter / 2,
+          y: this.pos.y + this.diameter / 2
+        };
+        const holeCenter = {
+          x: holePos.x + holeDiameter / 2,
+          y: holePos.y + holeDiameter / 2
+        };
+        // Collision occurs when the ball is fully inside the hole.
+        const distance = Math.hypot(ballCenter.x - holeCenter.x, ballCenter.y - holeCenter.y);
+        return distance < (holeDiameter / 2 - this.diameter / 2);
+      }
+
+      hide() {
+        this.element.style.visibility = 'hidden';
+        this.visible = false;
+      }
+
+      remove() {
+        container.removeChild(this.element);
+      }
+    }
+
+    /***** Function to Handle Ball-to-Ball Collisions *****/
+    function handleBallCollisions() {
+      // For each pair of balls, if both are visible, check for collision.
+      for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+          const b1 = balls[i];
+          const b2 = balls[j];
+          if (!b1.visible || !b2.visible) continue;
+
+          // Compute centers.
+          const b1Center = {
+            x: b1.pos.x + b1.diameter / 2,
+            y: b1.pos.y + b1.diameter / 2
+          };
+          const b2Center = {
+            x: b2.pos.x + b2.diameter / 2,
+            y: b2.pos.y + b2.diameter / 2
+          };
+
+          const dx = b1Center.x - b2Center.x;
+          const dy = b1Center.y - b2Center.y;
+          const distSq = dx * dx + dy * dy;
+          const minDist = (b1.diameter + b2.diameter) / 2;
+          if (distSq < minDist * minDist && distSq > 0) {
+            const dist = Math.sqrt(distSq);
+            // Normal vector
+            const nx = dx / dist;
+            const ny = dy / dist;
+            // Relative velocity
+            const rvx = b1.vel.x - b2.vel.x;
+            const rvy = b1.vel.y - b2.vel.y;
+            // Dot product along the normal
+            const dot = rvx * nx + rvy * ny;
+            // Only resolve if balls are moving toward each other.
+            if (dot < 0) {
+              // For equal masses, the impulse scalar (using standard elastic collision formula)
+              const impulse = (2 * dot) / (1 + 1);
+              b1.vel.x -= impulse * nx;
+              b1.vel.y -= impulse * ny;
+              b2.vel.x += impulse * nx;
+              b2.vel.y += impulse * ny;
+            }
+            // Separate the balls to avoid overlap.
+            const overlap = (minDist - dist) / 2;
+            b1.pos.x += nx * overlap;
+            b1.pos.y += ny * overlap;
+            b2.pos.x -= nx * overlap;
+            b2.pos.y -= ny * overlap;
+          }
+        }
+      }
+    }
+
+    /***** Functions to Emit Balls *****/
+    function emitBall() {
+      const initialPos = { x: 0, y: 0 };
+      const initialVel = { x: 400, y: 0 };
+      const newBall = new Ball(initialPos, initialVel);
+      balls.push(newBall);
+    }
+
+    // In two-ball mode, emit two balls in quick succession.
+    function emitTwoBallsRound() {
+      emitBall();
+      setTimeout(() => {
+        emitBall();
+      }, emissionDelay);
+    }
+
+    /***** Function to Decrease Sizes Each Round *****/
+    function decreaseSizes() {
+      // Update the global ball diameter (ensuring it does not drop below the minimum).
+      currentBallDiameter = Math.max(currentBallDiameter * sizeReductionFactor, minBallDiameter);
+      // The hole is always exactly 5% larger than the ball.
+      currentHoleDiameter = currentBallDiameter * 1.05;
+      holeDiameter = currentHoleDiameter;
+      // Update the hole's displayed size.
+      hole.style.width = holeDiameter + "px";
+      hole.style.height = holeDiameter + "px";
+    }
+
+    /***** Function to Position the Hole *****/
+    function positionHole() {
+      const maxX = containerWidth - holeDiameter;
+      const maxY = containerHeight - holeDiameter;
+      const randomX = Math.random() * maxX;
+      const randomY = Math.random() * maxY;
+      holeRelativePos.x = randomX / containerWidth;
+      holeRelativePos.y = randomY / containerHeight;
+      holePos.x = randomX;
+      holePos.y = randomY;
+      hole.style.left = holePos.x + "px";
+      hole.style.top = holePos.y + "px";
+    }
+
+    /***** Function to Reset the Game Each Round *****/
+    function resetGame() {
+      // Check if total elapsed time (since session start) is 60 seconds or more.
+      const totalElapsed = (performance.now() - totalTimeStart) / 1000;
+      if (totalElapsed >= 60) {  // For testing, threshold is 60 seconds.
+        emitTwoBalls = true;
+      }
+      // Decrease sizes every round.
+      decreaseSizes();
+      // Reset the round-reset flag.
+      roundResetScheduled = false;
+      // Remove existing ball elements.
+      balls.forEach(ball => ball.remove());
+      balls.length = 0;
+      // Reset timers.
+      lastTimestamp = null;
+      timerStart = performance.now();
+      // Reposition the hole.
+      positionHole();
+      // Emit new ball(s) based on mode.
+      if (emitTwoBalls) {
+        emitTwoBallsRound();
+      } else {
+        emitBall();
+      }
+    }
+
+    /***** Animation Loop *****/
+    function animate(timestamp) {
+      if (!lastTimestamp) {
+        lastTimestamp = timestamp;
+      }
+      const dt = (timestamp - lastTimestamp) / 1000; // Delta time in seconds
+      lastTimestamp = timestamp;
+
+      // Update round timer.
+      if (timerStart !== null) {
+        const elapsed = (timestamp - timerStart) / 1000;
+        timerElem.textContent = "TIMER: " + elapsed.toFixed(1) + "s";
+      }
+
+      // Update total time display.
+      const totalElapsed = (timestamp - totalTimeStart) / 1000;
+      totalTimeElem.textContent = "TOTAL TIME: " + totalElapsed.toFixed(1) + "s";
+
+      // Update each ball.
+      balls.forEach(ball => {
+        if (ball.visible) {
+          ball.update(dt);
+          if (ball.checkCollision()) {
+            ball.hide();
+            score++;
+            scoreElem.textContent = "TOTAL: " + score;
+          }
+        }
+      });
+
+      // In two-ball mode, handle collisions between balls.
+      if (emitTwoBalls) {
+        handleBallCollisions();
+      }
+
+      // Check if the round should end.
+      if (!emitTwoBalls) {
+        // Single-ball mode: if the one ball is not visible, schedule reset.
+        if (balls.length > 0 && !balls[0].visible && !roundResetScheduled) {
+          roundResetScheduled = true;
+          setTimeout(resetGame, 1000);
+        }
+      } else {
+        // Two-ball mode: wait until two balls exist and both are not visible.
+        if (balls.length === 2 && !balls[0].visible && !balls[1].visible && !roundResetScheduled) {
+          roundResetScheduled = true;
+          setTimeout(resetGame, 1000);
+        }
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    /***** Window Resize Handling *****/
+    window.addEventListener('resize', () => {
+      containerWidth = window.innerWidth;
+      containerHeight = window.innerHeight;
+      const newHoleX = holeRelativePos.x * containerWidth;
+      const newHoleY = holeRelativePos.y * containerHeight;
+      holePos.x = Math.min(newHoleX, containerWidth - holeDiameter);
+      holePos.y = Math.min(newHoleY, containerHeight - holeDiameter);
+      hole.style.left = holePos.x + "px";
+      hole.style.top = holePos.y + "px";
+      balls.forEach(ball => {
+        ball.pos.x = Math.min(ball.pos.x, containerWidth - ball.diameter);
+        ball.pos.y = Math.min(ball.pos.y, containerHeight - ball.diameter);
+        ball.element.style.left = ball.pos.x + "px";
+        ball.element.style.top = ball.pos.y + "px";
+      });
+    });
+
+    /***** Device Orientation Handling *****/
+    window.addEventListener('deviceorientation', (event) => {
+      if (event.beta === null || event.gamma === null) return;
+      const betaRad = event.beta * Math.PI / 180;
+      const gammaRad = event.gamma * Math.PI / 180;
+      effectiveAcc.x = g * Math.sin(gammaRad);
+      effectiveAcc.y = g * Math.sin(betaRad) * Math.cos(gammaRad);
+    });
+
+    /***** Initialize Game *****/
+    // Position the hole initially and emit the first ball.
+    positionHole();
+    resetGame();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
