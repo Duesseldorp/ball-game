@@ -57,11 +57,3 @@ This browser‑based game challenges you to score points by getting the red ball
   
 - **Enhanced Security:**  
   Additional measures such as code obfuscation and more robust validation could be added to further protect the game logic.
-
-## Getting Started
-
-1. **Clone or Download the Repository:**
-
-   ```bash
-   git clone https://github.com/yourusername/interactive-ball-game.git
-   cd interactive-ball-game
